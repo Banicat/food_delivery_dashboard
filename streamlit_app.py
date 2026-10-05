@@ -526,5 +526,61 @@ with tab_explore:
         st.caption(AI_SOURCE)
 
 with tab_action:
-    st.caption("이 탭에서 볼 수 있는 것: 액션 카드 및 후속 조치 계획 (준비 중)")
-    st.caption("액션 카드는 다음 단계에서 추가합니다.")
+    st.caption("측정 KPI의 현재 값은 선택한 기간의 마지막 4주로 계산합니다")
+
+    # 사이드바 기간만 적용하고 플랫폼/유입경로 필터는 무시한 원본 기반 데이터 추출
+    df_period_only = df[(df["주시작일"] >= start) & (df["주시작일"] <= end)]
+    
+    # 선택된 기간의 마지막 4주 데이터 구하기
+    period_weeks = sorted(df_period_only["주시작일"].unique())
+    if len(period_weeks) >= 4:
+        last_4_weeks = period_weeks[-4:]
+        df_last4_base = df_period_only[df_period_only["주시작일"].isin(last_4_weeks)]
+    else:
+        df_last4_base = df_period_only  (-4주 미만인 경우 전체 선택 기간 기준)
+
+    # 카드 1 KPI 계산: 플랫폼이 Android인 데이터의 결제 전환율 (주문세션 ÷ 결제시작세션)
+    df_card1 = df_last4_base[df_last4_base["platform"] == "Android"]
+    if not df_card1.empty:
+        sum_card1 = df_last4_base[df_last4_base["플랫폼"] == "Android"][["결제시작세션", "주문세션"]].sum()
+        val_card1 = (sum_card1["주문세션"] / sum_card1["결제시작세션"] * 100) if sum_card1["결제시작세션"] > 0 else 0
+        metric_str_card1 = f"{val_card1:.1f}%" if sum_card1["결제시작세션"] > 0 else "데이터 없음"
+    else:
+        metric_str_card1 = "데이터 없음"
+
+    # 카드 2 KPI 계산: 유입경로가 push인 데이터의 방문 → 식당 조회 전환율 (조회세션 ÷ 세션수)
+    df_card2 = df_last4_base[df_last4_base["유입경로"] == "push"]
+    if not df_card2.empty:
+        sum_card2 = df_card2[["세션수", "조회세션"]].sum()
+        val_card2 = (sum_card2["조회세션"] / sum_card2["세션수"] * 100) if sum_card2["세션수"] > 0 else 0
+        metric_str_card2 = f"{val_card2:.1f}%" if sum_card2["세션수"] > 0 else "데이터 없음"
+    else:
+        metric_str_card2 = "데이터 없음"
+
+    col_action1, col_action2 = st.columns(2)
+
+    with col_action1:
+        with st.container(border=True):
+            st.markdown("""
+            **카드 1 · Android 결제**
+            - 문제: 결제 시작 → 주문 전환율이 2026-04-13 주부터 하락해 최저 41.4%(5/18 주), 6/1 주부터 회복
+            - 근거: 같은 기간 iOS는 평소 범위 안 · Android 결제 실패가 주 4건 이하 → 최대 153건
+            - 성격: 특정 시점에 생긴 문제
+            - 액션: 추가 분석: 앱 버전별로 결제 실패 확인 → 재발 감시: 결제 전환율이 평소 범위를 벗어나는지 매주 점검
+            - 우선순위: 영향 큼 · 실행 쉬움 → 바로 실행
+            """)
+            st.metric("Android 결제 전환율 (마지막 4주)", metric_str_card1)
+            st.caption("대시보드에서: 개요 탭 규칙 문장(플랫폼 Android) · 탐색 탭 드릴다운")
+
+    with col_action2:
+        with st.container(border=True):
+            st.markdown("""
+            **카드 2 · push 방문**
+            - 문제: 방문 → 식당 조회 전환율 28.4% (다른 경로 57~69%), 주문 전환율 3.2%
+            - 근거: 2026년 2월부터 세션의 30~36%가 push · 기간 내내 25~35%
+            - 성격: 처음부터 그런 구조
+            - 액션: 실험: 일부 사용자에게만 푸시 대상과 문구를 바꿔 방문 → 식당 조회 전환율 비교
+            - 우선순위: 효과 불확실 · 실행 쉬움 → 실험부터
+            """)
+            st.metric("push 방문 → 식당 조회 전환율 (마지막 4주)", metric_str_card2)
+            st.caption("대시보드에서: 탐색 탭 비교 기준 '유입경로' · 드릴다운 push")
