@@ -154,3 +154,92 @@ fig3 = px.bar(ws, x="주문전환율", y="유입경로", orientation="h", text_a
 fig3.update_xaxes(range=[0, ws["주문전환율"].max() * 1.2] if not ws.empty else [0, 100])
 fig3.update_layout(xaxis_title="주문 전환율 (%)", yaxis_title="")
 st.plotly_chart(fig3, width="stretch")
+
+# ------------------------------------------------------------
+# 4. 집단 비교 영역
+# ------------------------------------------------------------
+st.divider()
+st.subheader("집단 비교")
+
+group_type = st.radio("비교 기준", ["플랫폼", "유입경로"], horizontal=True)
+group_col = "플랫폼" if group_type == "플랫폼" else "유입경로"
+
+steps_dict = {
+    "1.방문": "세션수",
+    "2.식당조회": "조회세션",
+    "3.장바구니": "장바구니세션",
+    "4.결제시작": "결제시작세션",
+    "5.주문완료": "주문세션"
+}
+
+group_df = f.groupby(group_col)[list(steps_dict.values())].sum().reset_index()
+
+small_groups = group_df[group_df["세션수"] < 500][group_col].tolist()
+if small_groups:
+    st.caption(f"⚠️ 세션 수가 500개 미만인 집단({', '.join(small_groups)})이 포함되어 있어 값이 크게 흔들릴 수 있습니다.")
+
+left2, right2 = st.columns(2)
+
+# 왼쪽: 누적 전환율(첫 단계 대비 %) 퍼널
+cum_rows = []
+for _, row in group_df.iterrows():
+    g_name = row[group_col]
+    base_val = row["세션수"]
+    for step_name, col_name in steps_dict.items():
+        val = row[col_name]
+        rate_val = (val / base_val * 100) if base_val > 0 else 0
+        cum_rows.append({
+            group_col: g_name,
+            "단계": step_name,
+            "누적전환율": round(rate_val, 1),
+            "세션수": val
+        })
+df_cum = pd.DataFrame(cum_rows)
+
+fig_cum = px.funnel(
+    df_cum,
+    x="누적전환율",
+    y="단계",
+    color=group_col,
+    title="누적 전환율 퍼널 (첫 단계 대비 %)",
+    hover_data=["세션수"]
+)
+left2.plotly_chart(fig_cum, width="stretch")
+
+# 오른쪽: 단계 전환율(직전 단계 대비 %) 막대
+step_pairs = [
+    ("2.식당조회", "조회세션", "세션수"),
+    ("3.장바구니", "장바구니세션", "조회세션"),
+    ("4.결제시작", "결제시작세션", "장바구니세션"),
+    ("5.주문완료", "주문세션", "결제시작세션")
+]
+
+step_rows = []
+for _, row in group_df.iterrows():
+    g_name = row[group_col]
+    for step_name, cur_col, prev_col in step_pairs:
+        cur_val = row[cur_col]
+        prev_val = row[prev_col]
+        conv_rate = (cur_val / prev_val * 100) if prev_val > 0 else 0
+        step_rows.append({
+            group_col: g_name,
+            "단계": step_name,
+            "단계전환율": round(conv_rate, 1),
+            "기준세션수": prev_val,
+            "현재세션수": cur_val
+        })
+df_step = pd.DataFrame(step_rows)
+
+fig_step = px.bar(
+    df_step,
+    x="단계전환율",
+    y="단계",
+    color=group_col,
+    barmode="group",
+    orientation="h",
+    text_auto=".1f",
+    hover_data=["기준세션수", "현재세션수"],
+    title="단계 전환율 (직전 단계 대비 %)"
+)
+fig_step.update_layout(xaxis_title="단계 전환율 (%)", yaxis_title="")
+right2.plotly_chart(fig_step, width="stretch")
